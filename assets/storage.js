@@ -101,3 +101,11 @@ export function localDateTime(value = new Date()) {
     .toISOString()
     .slice(0, 16);
 }
+export function parseLocalDateTime(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value))
+    throw new Error("Enter a valid date and time.");
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime()) || localDateTime(date) !== value)
+    throw new Error("That local time does not exist. Choose another time.");
+  return date.toISOString();
+}

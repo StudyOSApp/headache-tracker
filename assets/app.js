@@ -5,7 +5,9 @@ import {
   persistState,
   validateEntry,
   localDateTime,
+  parseLocalDateTime,
 } from "./storage.js";
+import { DRAFT_KEY, captureDraft, isDraft } from "./draft.js";
 
 const main = document.querySelector("main");
 const nav = document.querySelector("nav");
@@ -13,6 +15,19 @@ let state = emptyState(),
   blocked = false,
   page = "home",
   editingId = null;
+let dirty = false;
+let draft = null;
+let draftPersisted = false;
+try {
+  const raw = sessionStorage.getItem(DRAFT_KEY);
+  if (raw) {
+    const parsed = JSON.parse(raw);
+    if (isDraft(parsed)) draft = parsed;
+    draftPersisted = !!draft;
+  }
+} catch {
+  // A private browser may block session storage. The in-memory guard still works.
+}
 try {
   state = loadState(localStorage);
 } catch {
@@ -41,11 +56,41 @@ function notice(message) {
   el.textContent = message;
   el.hidden = !message;
 }
+function formError(message) {
+  const el = main.querySelector("#form-error");
+  if (!el) return;
+  el.textContent = message;
+  el.hidden = !message;
+  if (message) el.scrollIntoView({ block: "center" });
+}
+function saveDraft() {
+  const form = main.querySelector("#entry-form");
+  if (!form) return;
+  dirty = true;
+  draft = captureDraft(form, editingId);
+  draftPersisted = false;
+  try {
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    draftPersisted = true;
+  } catch {
+    notice("This browser cannot preserve an unfinished entry after refresh. Keep this tab open until you save.");
+  }
+}
+function clearDraft() {
+  dirty = false;
+  draft = null;
+  draftPersisted = false;
+  try {
+    sessionStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // No session storage was available.
+  }
+}
 function commit(next) {
   if (blocked) {
-    notice(
-      "Storage is unavailable or changed in another tab. Reload before saving.",
-    );
+    const message = "Storage is unavailable or changed in another tab. Reload before saving.";
+    notice(message);
+    formError(message);
     return false;
   }
   try {
@@ -53,16 +98,16 @@ function commit(next) {
     state = next;
     return true;
   } catch {
-    notice(
-      "Could not save in this browser. Your changes are still on screen. Check browser storage permissions or available space and try again.",
-    );
+    const message = "Could not save in this browser. Your changes are still on screen. Check browser storage permissions or available space and try again.";
+    notice(message);
+    formError(message);
     return false;
   }
 }
 const privacy =
   "This prototype stores information only in this browser, not in a secure cloud account or medical-record system. It can be lost when browser data is cleared and may be accessible to others using the same browser profile. Use made-up information for testing.";
 const safety = () =>
-  `<details class="safety"><summary>When to get urgent help</summary><p>Get emergency help for a sudden, extremely painful headache, or headache with new weakness, trouble speaking, confusion, seizures, loss of vision, or high fever and a stiff neck. Seek urgent care after a head injury or for a new or worsening headache that concerns you.</p><p>General education only; this tracker does not diagnose or provide medical advice. Contact local emergency services for an emergency.</p><p><a href="https://www.nhs.uk/symptoms/headaches/" target="_blank" rel="noopener noreferrer">Read NHS headache guidance ↗</a> (opens an external site)</p></details>`;
+  `<details class="safety"><summary>When to get urgent help</summary><p>Get emergency help for a sudden, extremely painful headache, a headache after a recent head injury, or headache with new weakness, trouble speaking, confusion, seizures, loss of vision, or high fever and a stiff neck. Seek urgent care for a new or worsening headache that concerns you.</p><p>General education only; this tracker does not diagnose or provide medical advice. Contact local emergency services for an emergency.</p><p><a href="https://www.nhs.uk/symptoms/headaches/" target="_blank" rel="noopener noreferrer">Read NHS headache guidance ↗</a> (opens an external site)</p></details>`;
 function duration(entry) {
   const minutes = Math.max(
     0,
@@ -102,14 +147,14 @@ function render(focus = false) {
         : hour < 18
           ? "Good afternoon"
           : "Good evening";
-    main.innerHTML = `<div class="intro"><p class="eyebrow">Your daily check-in</p><h1>${greeting}${state.profile.name ? ", " + escape(state.profile.name) : ""}.</h1><p>Keep a note. Take it one moment at a time.</p></div><section class="hero"><h2>How is your head feeling?</h2><p>Choose a pain level and save. Add details whenever you're ready.</p><button class="primary wide" data-action="log">＋ Log Headache</button></section><div class="section-title"><h2>Ongoing</h2><span class="badge">${state.entries.filter((e) => !e.end).length}</span></div>${
+    main.innerHTML = `<div class="intro"><p class="eyebrow">Your daily check-in</p><h1>${greeting}${state.profile.name ? ", " + escape(state.profile.name) : ""}.</h1><p>Keep a note. Take it one moment at a time.</p></div>${draft ? '<div class="card"><h2>Unfinished entry</h2><p>Your changes are still here.</p><div class="actions"><button class="primary" data-action="resume">Resume entry</button><button data-action="discard-draft">Discard draft</button></div></div>' : ''}<section class="hero"><h2>How is your head feeling?</h2><p>Choose a pain level and save. Add details whenever you're ready.</p><button class="primary wide" data-action="log">＋ Log Headache</button></section><div class="section-title"><h2>Ongoing</h2><span class="badge">${state.entries.filter((e) => !e.end).length}</span></div>${
       sorted()
         .filter((e) => !e.end)
         .map(card)
         .join("") || '<p class="empty">No ongoing headaches logged.</p>'
     }<div class="section-title"><h2>Recent activity</h2><button class="text-button" data-page="history">View all</button></div>${sorted().slice(0, 3).map(card).join("") || '<p class="empty">Your first entry starts here. Nothing to fill out in advance.</p>'}${safety()}`;
   } else if (page === "history") {
-    main.innerHTML = `<div class="intro"><p class="eyebrow">One entry at a time</p><h1>History</h1><p>Most recent start time first · ${state.entries.length} entries</p></div><button class="primary wide" data-action="log">＋ Log Headache</button>${sorted().map(card).join("") || '<p class="empty">No entries yet. Log a headache to start your history.</p>'}`;
+    main.innerHTML = `<div class="intro"><p class="eyebrow">One entry at a time</p><h1>History</h1><p>Most recent start time first · ${state.entries.length} ${state.entries.length === 1 ? "entry" : "entries"}</p></div><button class="primary wide" data-action="log">＋ Log Headache</button>${sorted().map(card).join("") || '<p class="empty">No entries yet. Log a headache to start your history.</p>'}`;
   } else if (page === "reports") {
     main.innerHTML = `<p class="eyebrow">The bigger picture</p><h1>Reports</h1><div class="card"><h2>Start with a simple record.</h2><p>Reports will come in a later phase. For now, you can review each entry in History. This prototype does not infer patterns or diagnoses.</p><button class="text-button" data-page="history">Open history</button></div>`;
   } else {
@@ -183,6 +228,51 @@ function editor(id = null, ending = false) {
   main.focus();
   window.scrollTo(0, 0);
 }
+function resumeDraft() {
+  if (!isDraft(draft)) return;
+  const saved = draft;
+  if (saved.editingId && !state.entries.some((e) => e.id === saved.editingId)) {
+    notice("The entry being edited no longer exists. Your unfinished changes were not applied.");
+    return;
+  }
+  editor(saved.editingId);
+  const form = main.querySelector("#entry-form");
+  const container = form.querySelector("#medications");
+  container.innerHTML = "";
+  for (let i = 0; i < saved.medicationCount; i++)
+    container.insertAdjacentHTML("beforeend", medication());
+  const controls = [...form.elements].filter((el) => el.name || el.dataset.med);
+  const incompatible =
+    controls.length !== saved.fields.length ||
+    controls.some(
+      (el, i) =>
+        saved.fields[i].type !== el.type ||
+        saved.fields[i].name !== (el.name || null) ||
+        saved.fields[i].med !== (el.dataset.med || null),
+    );
+  if (incompatible) {
+    page = "home";
+    render(true);
+    notice("This unfinished entry is from an incompatible form version. Its saved data was not changed.");
+    return;
+  }
+  controls.forEach((el, i) => {
+    const field = saved.fields[i];
+    if (el.type === "checkbox") el.checked = field.checked;
+    else el.value = field.value;
+  });
+  const ongoing = form.elements.namedItem("ongoing").checked;
+  form.querySelector("#end-label").hidden = ongoing;
+  form.elements.namedItem("end").disabled = ongoing;
+  form.querySelector("#pain-output").innerHTML = `${Number(form.elements.namedItem("severity").value)}<small> / 10</small>`;
+  [...form.querySelectorAll("details")].forEach((el, i) => {
+    el.open = saved.detailSections[i];
+  });
+  dirty = true;
+  draft = saved;
+  draftPersisted = true;
+  notice("Unfinished entry restored. Save it when ready.");
+}
 function view(id) {
   const e = state.entries.find((x) => x.id === id);
   if (!e) return;
@@ -200,10 +290,11 @@ function view(id) {
   window.scrollTo(0, 0);
 }
 let confirmAction;
-function confirmDelete(title, copy, action) {
+function confirmDelete(title, copy, action, label = "Delete") {
   document.querySelector("#confirm-title").textContent = title;
   document.querySelector("#confirm-copy").textContent = copy;
   confirmAction = action;
+  document.querySelector("#confirm-delete").textContent = label;
   document.querySelector("#confirmation").showModal();
 }
 document.querySelector("#confirm-cancel").onclick = () =>
@@ -215,6 +306,22 @@ document.querySelector("#confirm-delete").onclick = () => {
 document.addEventListener("click", (event) => {
   const b = event.target.closest("button");
   if (!b) return;
+  if (dirty && (b.dataset.page || b.dataset.action === "cancel" || b.dataset.action === "log")) {
+    confirmDelete(
+      "Discard unfinished changes?",
+      "Your unsaved entry changes will be removed from this browser.",
+      () => {
+        clearDraft();
+        b.click();
+      },
+      "Discard",
+    );
+    return;
+  }
+  if (draft && !dirty && b.dataset.action === "log") {
+    resumeDraft();
+    return;
+  }
   if (b.dataset.page) {
     page = b.dataset.page;
     notice("");
@@ -244,11 +351,28 @@ document.addEventListener("click", (event) => {
     case "log":
       editor();
       break;
+    case "resume":
+      resumeDraft();
+      break;
+    case "discard-draft":
+      confirmDelete(
+        "Discard unfinished entry?",
+        "This removes the saved draft from this browser. Saved headache entries stay.",
+        () => {
+          clearDraft();
+          render(true);
+        },
+        "Discard",
+      );
+      break;
     case "cancel":
       render(true);
       break;
     case "skip":
-      if (commit({ ...state, onboardingComplete: true })) render(true);
+      if (commit({ ...state, onboardingComplete: true })) {
+        page = "home";
+        render(true);
+      }
       break;
     case "add-med":
       document
@@ -257,9 +381,11 @@ document.addEventListener("click", (event) => {
       document
         .querySelector("#medications .medication:last-child input")
         .focus();
+      saveDraft();
       break;
     case "remove-med":
       b.closest(".medication").remove();
+      saveDraft();
       break;
     case "clear-profile":
       confirmDelete(
@@ -280,6 +406,7 @@ document.addEventListener("click", (event) => {
         () => {
           try {
             localStorage.removeItem(STORAGE_KEY);
+            clearDraft();
             state = emptyState();
             blocked = false;
             page = "home";
@@ -296,11 +423,14 @@ document.addEventListener("click", (event) => {
   }
 });
 main.addEventListener("input", (event) => {
+  if (event.target.closest("#entry-form")) formError("");
   if (event.target.name === "severity")
     document.querySelector("#pain-output").innerHTML =
       `${Number(event.target.value)}<small> / 10</small>`;
+  if (event.target.closest("#entry-form")) saveDraft();
 });
 main.addEventListener("change", (event) => {
+  if (event.target.closest("#entry-form")) formError("");
   if (event.target.name === "ongoing") {
     const ongoing = event.target.checked;
     document.querySelector("#end-label").hidden = ongoing;
@@ -308,29 +438,39 @@ main.addEventListener("change", (event) => {
     input.disabled = ongoing;
     input.required = !ongoing;
   }
+  if (event.target.closest("#entry-form")) saveDraft();
+});
+main.addEventListener("toggle", (event) => {
+  if (event.target.closest("#entry-form")) saveDraft();
+}, true);
+window.addEventListener("beforeunload", (event) => {
+  if (dirty && !draftPersisted) event.preventDefault();
 });
 main.addEventListener("submit", (event) => {
   event.preventDefault();
   const form = event.target;
   const data = new FormData(form);
   if (form.id === "profile-form") {
+    const finishingWelcome = !state.onboardingComplete;
     const profile = {
       name: data.get("name").trim(),
       age: data.get("age") === "" ? "" : Number(data.get("age")),
       goal: data.get("goal").trim(),
     };
     if (commit({ ...state, profile, onboardingComplete: true })) {
+      if (finishingWelcome) page = "home";
       render(true);
       notice("Profile saved in this browser.");
     }
     return;
   }
   if (form.id !== "entry-form") return;
+  saveDraft();
   try {
     const entry = {
       id: editingId || crypto.randomUUID(),
-      start: new Date(data.get("start")).toISOString(),
-      end: data.has("ongoing") ? null : new Date(data.get("end")).toISOString(),
+      start: parseLocalDateTime(data.get("start")),
+      end: data.has("ongoing") ? null : parseLocalDateTime(data.get("end")),
       severity: Number(data.get("severity")),
       medications: [],
     };
@@ -346,7 +486,7 @@ main.addEventListener("submit", (event) => {
       return {
         name: v("name"),
         dose: v("dose"),
-        time: v("time") ? new Date(v("time")).toISOString() : null,
+        time: v("time") ? parseLocalDateTime(v("time")) : null,
         effectiveness: v("effectiveness"),
       };
     });
@@ -357,18 +497,17 @@ main.addEventListener("submit", (event) => {
         entries: [...state.entries.filter((e) => e.id !== entry.id), entry],
       })
     ) {
+      clearDraft();
       page = "home";
       render(true);
       notice("Headache saved. You can add or edit details anytime.");
     }
   } catch (error) {
-    const el = document.querySelector("#form-error");
-    el.textContent =
+    formError(
       error.message === "Invalid time value"
         ? "Enter a valid date and time."
-        : error.message;
-    el.hidden = false;
-    el.scrollIntoView({ block: "center" });
+        : error.message,
+    );
   }
 });
 // Stop stale tabs from silently overwriting another tab's edits.
