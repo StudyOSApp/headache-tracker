@@ -8,6 +8,7 @@ import {
   parseLocalDateTime,
 } from "./storage.js";
 import { DRAFT_KEY, captureDraft, isDraft } from "./draft.js";
+import { painDataForEntry, entryPainFields } from './head-map/data.js';
 
 const main = document.querySelector("main");
 const nav = document.querySelector("nav");
@@ -18,6 +19,38 @@ let state = emptyState(),
 let dirty = false;
 let draft = null;
 let draftPersisted = false;
+let painMap = null, mapGeneration = 0, editorMapData = null, editorEntryId = null;
+function disposePainMap() {
+  mapGeneration++;
+  painMap?.destroy();painMap = null;editorMapData = null;editorEntryId = null;
+}
+function mountEntryMap(readOnlyEntry = null) {
+  const host = main.querySelector('[data-pain-map]'), generation = mapGeneration;
+  import('./head-map/map.js').then(({ mountPainMap }) => {
+    if (generation !== mapGeneration || !host?.isConnected) return;
+    painMap = mountPainMap(host, readOnlyEntry ? painDataForEntry(readOnlyEntry) : editorMapData, {
+      readOnly: !!readOnlyEntry,
+      onChange(data) {
+        if (generation !== mapGeneration || readOnlyEntry) return;
+        editorMapData = data;
+        const severity = main.querySelector('[name="severity"]');
+        if (severity) severity.value = data.severity;
+        saveDraft();
+      },
+    });
+  }).catch(() => {
+    if (generation === mapGeneration && host?.isConnected) {
+      host.innerHTML = '<p class="hint">The head map could not load. Your saved pain locations are retained.</p>';
+      // Keep an accessible intensity field if the component itself cannot load.
+      if (!readOnlyEntry) {
+        const label = document.createElement('label');label.textContent = 'Pain intensity';
+        const input = document.createElement('input');input.type = 'range';input.min = '0';input.max = '10';input.value = editorMapData.severity;input.setAttribute('aria-label','Pain intensity');
+        input.oninput = () => { editorMapData.severity = Number(input.value);main.querySelector('[name="severity"]').value = input.value;saveDraft(); };
+        label.append(input);host.append(label);
+      }
+    }
+  });
+}
 try {
   const raw = sessionStorage.getItem(DRAFT_KEY);
   if (raw) {
@@ -67,7 +100,9 @@ function saveDraft() {
   const form = main.querySelector("#entry-form");
   if (!form) return;
   dirty = true;
-  draft = captureDraft(form, editingId);
+  if (painMap) editorMapData = painMap.snapshot();
+  if (editorMapData) form.elements.namedItem('severity').value = editorMapData.severity;
+  draft = captureDraft(form, editingId, editorMapData);
   draftPersisted = false;
   try {
     sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
@@ -127,6 +162,7 @@ function profileFields() {
   return `<label>Preferred first name <span class="muted">(optional)</span><input name="name" autocomplete="off" maxlength="40" value="${escape(p.name)}" placeholder="What should we call you?"></label><label>Age <span class="muted">(optional)</span><input name="age" type="number" inputmode="numeric" min="1" max="120" step="1" value="${p.age}" placeholder="Leave blank if you prefer"></label><label>What would you like to track? <span class="muted">(optional)</span><input name="goal" maxlength="160" value="${escape(p.goal)}" placeholder="For example, how often headaches happen"></label>`;
 }
 function render(focus = false) {
+  disposePainMap();
   editingId = null;
   if (blocked) page = "settings";
   nav.hidden = !state.onboardingComplete && !blocked;
@@ -158,7 +194,7 @@ function render(focus = false) {
   } else if (page === "reports") {
     main.innerHTML = `<p class="eyebrow">The bigger picture</p><h1>Reports</h1><div class="card"><h2>Start with a simple record.</h2><p>Reports will come in a later phase. For now, you can review each entry in History. This prototype does not infer patterns or diagnoses.</p><button class="text-button" data-page="history">Open history</button></div>`;
   } else {
-    main.innerHTML = `<p class="eyebrow">Make it yours</p><h1>Settings</h1>${blocked ? '<p class="error">Stored data could not be read, its version is unsupported, or another tab changed it. It has not been overwritten. Reload to retry, or explicitly delete this prototype’s data below.</p>' : `<form id="profile-form" class="card"><h2>Your profile</h2>${profileFields()}<button class="primary wide" type="submit">Save profile</button></form><div class="actions"><button data-action="clear-profile">Clear profile</button><button data-action="reset-onboarding">Reset welcome</button></div>`}<div class="local-note">${privacy}</div><button class="danger wide" data-action="delete-all">Delete All Data</button><p class="hint">Deletes this prototype's entries and profile, and shows the welcome screen again.</p>${safety()}`;
+    main.innerHTML = `<p class="eyebrow">Make it yours</p><h1>Settings</h1>${blocked ? '<p class="error">Stored data could not be read, its version is unsupported, or another tab changed it. It has not been overwritten. Reload to retry, or explicitly delete this prototype’s data below.</p>' : `<form id="profile-form" class="card"><h2>Your profile</h2>${profileFields()}<button class="primary wide" type="submit">Save profile</button></form><div class="actions"><button data-action="clear-profile">Clear profile</button><button data-action="reset-onboarding">Reset welcome</button></div>`}<div class="local-note">${privacy}</div><details class="card"><summary>3D model credits</summary><p>Head adapted from “Infinite, 3D Head Scan” by Lee Perry-Smith, based on work at triplegangers.com, under <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener noreferrer">CC BY 3.0</a>. Adaptations include the neutral surface, neck and upper shoulders, and pain mapping.</p><p>Rendered with Three.js (MIT license).</p></details><button class="danger wide" data-action="delete-all">Delete All Data</button><p class="hint">Deletes this prototype's entries and profile, and shows the welcome screen again.</p>${safety()}`;
   }
   if (focus) {
     main.focus();
@@ -206,6 +242,7 @@ function medication(m = {}) {
   return `<section class="medication"><h3>Medication taken</h3><label>Name<input data-med="name" maxlength="100" value="${escape(m.name)}" placeholder="Medication name"></label><label>Dose as taken <span class="muted">(optional)</span><input data-med="dose" maxlength="100" value="${escape(m.dose)}" placeholder="Include units, if known"></label><label>Time taken <span class="muted">(optional)</span><input data-med="time" type="datetime-local" value="${m.time ? localDateTime(m.time) : ""}"></label><label>Perceived effectiveness<select data-med="effectiveness">${["", "Not sure yet", "No relief", "Some relief", "Complete relief"].map((v) => `<option ${m.effectiveness === v ? "selected" : ""} value="${v}">${v || "Not recorded"}</option>`).join("")}</select></label><button type="button" class="text-button" data-action="remove-med">Remove medication</button></section>`;
 }
 function editor(id = null, ending = false) {
+  disposePainMap();
   const e = state.entries.find((x) => x.id === id) || {
     start: new Date().toISOString(),
     end: null,
@@ -217,14 +254,17 @@ function editor(id = null, ending = false) {
     medications: [],
   };
   editingId = id;
+  editorEntryId = e.id || crypto.randomUUID();
+  editorMapData = painDataForEntry({ ...e, id: editorEntryId });
   notice("");
-  main.innerHTML = `<button class="back text-button" data-action="cancel">← Back</button><p class="eyebrow">${id ? "Your entry" : "A quick check-in"}</p><h1>${ending ? "End headache" : id ? "Edit headache" : "Log Headache"}</h1><p class="hint">Pain level and start time are all you need.</p><form id="entry-form"><p id="form-error" class="error" role="alert" hidden></p><fieldset><legend>Pain severity</legend><output class="pain-output" for="severity" id="pain-output">${e.severity}<small> / 10</small></output><input aria-label="Pain severity, 0 no pain to 10 worst imaginable" id="severity" name="severity" type="range" min="0" max="10" step="1" value="${e.severity}"><div class="range-labels"><span>0 · No pain</span><span>10 · Worst imaginable</span></div></fieldset><label>Started<input name="start" type="datetime-local" required value="${localDateTime(e.start)}"></label><label class="choice"><input type="checkbox" name="ongoing" ${!e.end && !ending ? "checked" : ""}>Still ongoing</label><label id="end-label" ${!e.end && !ending ? "hidden" : ""}>Ended<input name="end" type="datetime-local" ${!e.end && !ending ? "disabled" : "required"} value="${localDateTime(e.end || new Date())}"></label><div class="actions"><button class="primary" type="submit">${id ? "Save changes" : "Save headache"}</button><button type="button" data-action="cancel">Cancel</button></div><details><summary>Add optional details</summary><p class="hint">Choose anything useful. Symptoms are observations, not a diagnosis.</p>${Object.keys(
+  main.innerHTML = `<button class="back text-button" data-action="cancel">← Back</button><p class="eyebrow">${id ? "Your entry" : "A quick check-in"}</p><h1>${ending ? "End headache" : id ? "Edit headache" : "Log Headache"}</h1><p class="hint">Pain level and start time are all you need.</p><form id="entry-form"><p id="form-error" class="error" role="alert" hidden></p><input type="hidden" name="severity" value="${e.severity}"><section data-pain-map><p class="hint">Loading pain map…</p></section><label>Started<input name="start" type="datetime-local" required value="${localDateTime(e.start)}"></label><label class="choice"><input type="checkbox" name="ongoing" ${!e.end && !ending ? "checked" : ""}>Still ongoing</label><label id="end-label" ${!e.end && !ending ? "hidden" : ""}>Ended<input name="end" type="datetime-local" ${!e.end && !ending ? "disabled" : "required"} value="${localDateTime(e.end || new Date())}"></label><div class="actions"><button class="primary" type="submit">${id ? "Save changes" : "Save headache"}</button><button type="button" data-action="cancel">Cancel</button></div><details><summary>Add optional details</summary><p class="hint">Choose anything useful. Symptoms are observations, not a diagnosis.</p>${Object.keys(
     groups,
   )
     .map((k) => checks(k, e[k]))
     .join(
       "",
     )}</details><details><summary>Medication <span class="muted">(optional)</span></summary><p class="hint">Record what you took. This app does not recommend medications or doses.</p><div id="medications">${e.medications.map(medication).join("")}</div><button type="button" data-action="add-med">＋ Add medication</button></details><div class="actions"><button class="primary" type="submit">${id ? "Save changes" : "Save headache"}</button></div></form>`;
+  mountEntryMap();
   main.focus();
   window.scrollTo(0, 0);
 }
@@ -236,6 +276,10 @@ function resumeDraft() {
     return;
   }
   editor(saved.editingId);
+  if (saved.headMap) {
+    editorMapData = structuredClone(saved.headMap);
+    editorEntryId = saved.headMap.entryId;
+  }
   const form = main.querySelector("#entry-form");
   const container = form.querySelector("#medications");
   container.innerHTML = "";
@@ -246,7 +290,7 @@ function resumeDraft() {
     controls.length !== saved.fields.length ||
     controls.some(
       (el, i) =>
-        saved.fields[i].type !== el.type ||
+        (saved.fields[i].type !== el.type && !(saved.fields[i].name === 'severity' && saved.fields[i].type === 'range' && el.type === 'hidden')) ||
         saved.fields[i].name !== (el.name || null) ||
         saved.fields[i].med !== (el.dataset.med || null),
     );
@@ -264,7 +308,8 @@ function resumeDraft() {
   const ongoing = form.elements.namedItem("ongoing").checked;
   form.querySelector("#end-label").hidden = ongoing;
   form.elements.namedItem("end").disabled = ongoing;
-  form.querySelector("#pain-output").innerHTML = `${Number(form.elements.namedItem("severity").value)}<small> / 10</small>`;
+  editorMapData.severity = Number(form.elements.namedItem('severity').value);
+  if (!saved.headMap) editorMapData.lastUsedIntensity = Math.max(1, editorMapData.severity);
   [...form.querySelectorAll("details")].forEach((el, i) => {
     el.open = saved.detailSections[i];
   });
@@ -274,18 +319,20 @@ function resumeDraft() {
   notice("Unfinished entry restored. Save it when ready.");
 }
 function view(id) {
+  disposePainMap();
   const e = state.entries.find((x) => x.id === id);
   if (!e) return;
-  main.innerHTML = `<button class="back text-button" data-page="history">← History</button><p class="eyebrow">Headache entry</p><h1>${escape(fmt(e.start))}</h1><div class="card"><div class="entry-top"><span class="badge ${e.end ? "done" : ""}">${e.end ? "Completed" : "Ongoing"}</span><span class="severity">${e.severity}<small> / 10</small></span></div><dl class="detail-grid"><dt>Started</dt><dd>${escape(fmt(e.start))}</dd><dt>Ended</dt><dd>${e.end ? escape(fmt(e.end)) : "Still ongoing"}</dd><dt>Duration</dt><dd>${duration(e)}</dd>${Object.keys(
+  main.innerHTML = `<button class="back text-button" data-page="history">← History</button><p class="eyebrow">Headache entry</p><h1>${escape(fmt(e.start))}</h1>${e.painLocations?.length || e.behindEye?.length ? '<section data-pain-map></section>' : ''}<div class="card"><div class="entry-top"><span class="badge ${e.end ? "done" : ""}">${e.end ? "Completed" : "Ongoing"}</span><span class="severity">${e.severity}<small> / 10</small></span></div><dl class="detail-grid"><dt>Started</dt><dd>${escape(fmt(e.start))}</dd><dt>Ended</dt><dd>${e.end ? escape(fmt(e.end)) : "Still ongoing"}</dd><dt>Duration</dt><dd>${duration(e)}</dd>${Object.keys(
     groups,
   )
     .map(
       (k) =>
-        `<dt>${k[0].toUpperCase() + k.slice(1)}</dt><dd>${escape(e[k].join(", ") || "Not recorded")}</dd>`,
+        k === 'location' && e.painLocations?.length ? '' : `<dt>${k[0].toUpperCase() + k.slice(1)}</dt><dd>${escape(e[k].join(", ") || "Not recorded")}</dd>`,
     )
     .join(
       "",
     )}<dt>Medication</dt><dd>${e.medications.map((m) => `${escape(m.name)}${m.dose ? " · " + escape(m.dose) : ""}${m.time ? " · " + escape(fmt(m.time)) : ""}${m.effectiveness ? " · " + escape(m.effectiveness) : ""}`).join("<br>") || "Not recorded"}</dd></dl></div><div class="actions"><button class="primary" data-edit="${escape(id)}">Edit entry</button>${!e.end ? `<button data-end="${escape(id)}">End headache</button>` : ""}</div><button class="text-button danger wide" data-delete="${escape(id)}">Delete entry</button>`;
+  if (main.querySelector('[data-pain-map]')) mountEntryMap(e);
   main.focus();
   window.scrollTo(0, 0);
 }
@@ -423,13 +470,14 @@ document.addEventListener("click", (event) => {
   }
 });
 main.addEventListener("input", (event) => {
+  if (event.target.closest('.head-map')) return;
   if (event.target.closest("#entry-form")) formError("");
-  if (event.target.name === "severity")
-    document.querySelector("#pain-output").innerHTML =
-      `${Number(event.target.value)}<small> / 10</small>`;
+  if (event.target.name === "severity" && document.querySelector('#pain-output'))
+    document.querySelector('#pain-output').innerHTML = `${Number(event.target.value)}<small> / 10</small>`;
   if (event.target.closest("#entry-form")) saveDraft();
 });
 main.addEventListener("change", (event) => {
+  if (event.target.closest('.head-map')) return;
   if (event.target.closest("#entry-form")) formError("");
   if (event.target.name === "ongoing") {
     const ongoing = event.target.checked;
@@ -467,12 +515,15 @@ main.addEventListener("submit", (event) => {
   if (form.id !== "entry-form") return;
   saveDraft();
   try {
+    data.set('severity', String(editorMapData?.severity ?? data.get('severity')));
     const entry = {
-      id: editingId || crypto.randomUUID(),
+      ...(state.entries.find(e => e.id === editingId) || {}),
+      id: editorEntryId || editingId || crypto.randomUUID(),
       start: parseLocalDateTime(data.get("start")),
       end: data.has("ongoing") ? null : parseLocalDateTime(data.get("end")),
       severity: Number(data.get("severity")),
       medications: [],
+      ...(editorMapData ? entryPainFields(editorMapData) : {}),
     };
     for (const key of Object.keys(groups))
       entry[key] = [

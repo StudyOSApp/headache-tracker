@@ -1,5 +1,7 @@
 export const DRAFT_KEY = "headache-tracker.draft.v1";
-export function captureDraft(form, editingId) {
+import { validatePainData } from './head-map/data.js';
+
+export function captureDraft(form, editingId, headMap = null) {
   return {
     version: 1,
     editingId,
@@ -14,9 +16,16 @@ export function captureDraft(form, editingId) {
       })),
     medicationCount: form.querySelectorAll(".medication").length,
     detailSections: [...form.querySelectorAll("details")].map((el) => el.open),
+    ...(headMap ? { headMap: structuredClone(headMap) } : {}),
   };
 }
 export function isDraft(value) {
+  if (value?.headMap !== undefined) {
+    try {
+      validatePainData(value.headMap);
+      if (value.editingId && value.headMap.entryId !== value.editingId) return false;
+    } catch { return false; }
+  }
   return (
     value?.version === 1 &&
     (value.editingId === null || typeof value.editingId === "string") &&

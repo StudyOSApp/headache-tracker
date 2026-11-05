@@ -1,3 +1,5 @@
+import { validatePainData, painDataForEntry, HEAD_MODEL_VERSION } from './head-map/data.js';
+
 export const STORAGE_KEY = "headache-tracker.v1";
 export const emptyState = () => ({
   version: 1,
@@ -61,6 +63,13 @@ export function validateEntry(entry, now = Date.now()) {
       ].includes(med.effectiveness)
     )
       throw new Error("Choose a listed effectiveness option.");
+  }
+  if (entry.painLocations !== undefined || entry.behindEye !== undefined) {
+    if ((entry.painLocations !== undefined && !Array.isArray(entry.painLocations)) ||
+        (entry.behindEye !== undefined && !Array.isArray(entry.behindEye)) ||
+        (entry.painModelVersion !== undefined && entry.painModelVersion !== HEAD_MODEL_VERSION))
+      throw new Error('Stored pain-map details are unsupported.');
+    validatePainData(painDataForEntry(entry));
   }
   return entry;
 }
