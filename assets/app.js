@@ -9,6 +9,7 @@ import {
 } from "./storage.js";
 import { DRAFT_KEY, captureDraft, isDraft } from "./draft.js";
 import { painDataForEntry, entryPainFields } from './head-map/data.js';
+import { TRACKING_GOALS, selectedGoals, profileFromForm } from './profile.js';
 
 const main = document.querySelector("main");
 const nav = document.querySelector("nav");
@@ -19,6 +20,7 @@ let state = emptyState(),
 let dirty = false;
 let draft = null;
 let draftPersisted = false;
+let welcomeStep = 1;
 let painMap = null, mapGeneration = 0, editorMapData = null, editorEntryId = null;
 function disposePainMap() {
   mapGeneration++;
@@ -157,9 +159,16 @@ function duration(entry) {
 function card(e) {
   return `<article class="card"><div class="entry-top"><span class="badge ${e.end ? "done" : ""}">${e.end ? "Completed" : "Ongoing"}</span><span class="severity">${e.severity}<small> / 10</small></span></div><p class="entry-time">${escape(fmt(e.start))}</p><small>${duration(e)}</small><div class="actions"><button data-view="${escape(e.id)}">View entry</button>${!e.end ? `<button data-end="${escape(e.id)}">End headache</button>` : ""}</div></article>`;
 }
-function profileFields() {
+function identityFields() {
   const p = state.profile;
-  return `<label>Preferred first name <span class="muted">(optional)</span><input name="name" autocomplete="off" maxlength="40" value="${escape(p.name)}" placeholder="What should we call you?"></label><label>Age <span class="muted">(optional)</span><input name="age" type="number" inputmode="numeric" min="1" max="120" step="1" value="${p.age}" placeholder="Leave blank if you prefer"></label><label>What would you like to track? <span class="muted">(optional)</span><input name="goal" maxlength="160" value="${escape(p.goal)}" placeholder="For example, how often headaches happen"></label>`;
+  return `<label>Preferred first name <span class="muted">(optional)</span><input name="name" autocomplete="given-name" maxlength="40" value="${escape(p.name)}" placeholder="What should we call you?"></label><label>Age <span class="muted">(optional)</span><input name="age" type="number" inputmode="numeric" min="1" max="120" step="1" value="${p.age}" placeholder="Leave blank if you prefer"></label>`;
+}
+function trackingFields() {
+  const goals = selectedGoals(state.profile), other = goals.includes('other');
+  return `<fieldset class="tracking-field"><legend>What would you like to track?</legend><p class="hint">Choose one or more. You can change these later.</p><div class="tracking-options">${TRACKING_GOALS.map(option => `<label class="tracking-option"><input type="checkbox" name="trackingGoals" value="${option.id}" ${goals.includes(option.id) ? 'checked' : ''}><span>${option.label}</span></label>`).join('')}</div><label class="tracking-other" ${other ? '' : 'hidden'}>What else would you like to track?<input name="goal" maxlength="160" value="${escape(state.profile.goal)}" placeholder="Tell us what matters to you" ${other ? 'required' : 'disabled'}></label></fieldset>`;
+}
+function profileFields() {
+  return identityFields() + trackingFields();
 }
 function render(focus = false) {
   disposePainMap();
@@ -174,7 +183,9 @@ function render(focus = false) {
         : b.removeAttribute("aria-current"),
     );
   if (!state.onboardingComplete && !blocked) {
-    main.innerHTML = `<section class="welcome"><div class="welcome-icon" aria-hidden="true">◒</div><p class="eyebrow">A small start</p><h1>Make space for<br>a little clarity.</h1><p class="muted">A quick note now. A clearer picture later. Let's make this feel like yours.</p><button class="text-button" data-action="skip">Skip for now</button><form id="profile-form">${profileFields()}<p class="hint">Age is only kept in your profile; it does not change advice.</p><div class="local-note">${privacy}</div><button class="primary wide">Let's get started</button></form>${safety()}</section>`;
+    main.innerHTML = welcomeStep === 1
+      ? `<section class="welcome"><p class="eyebrow">Step 1 of 2</p><h1>Let's get to know you.</h1><p class="muted">A little clarity, one entry at a time.</p><form id="welcome-profile-form">${identityFields()}<p class="hint">Age stays in your profile and does not change advice.</p><button class="primary wide" type="submit">Get Started</button></form><button class="text-button" data-action="skip">Skip for now</button><details class="local-note"><summary>About your information</summary><p>${privacy}</p></details>${safety()}</section>`
+      : `<section class="welcome"><p class="eyebrow">Step 2 of 2</p><h1>What would you like to track?</h1><form id="goals-form">${trackingFields()}<div class="actions"><button type="button" data-action="welcome-back">Back</button><button class="primary" type="submit">Next</button></div></form><button class="text-button" data-action="skip">Skip for now</button></section>`;
   } else if (page === "home") {
     const hour = new Date().getHours();
     const greeting =
@@ -421,6 +432,14 @@ document.addEventListener("click", (event) => {
         render(true);
       }
       break;
+    case "welcome-back": {
+      const form = main.querySelector('#goals-form'), data = new FormData(form);
+      const trackingGoals = data.getAll('trackingGoals');
+      if (commit({ ...state, profile: { ...state.profile, trackingGoals, goal: trackingGoals.includes('other') ? data.get('goal').trim() : '' } })) {
+        welcomeStep = 1;notice('');render(true);
+      }
+      break;
+    }
     case "add-med":
       document
         .querySelector("#medications")
@@ -444,7 +463,7 @@ document.addEventListener("click", (event) => {
       );
       break;
     case "reset-onboarding":
-      if (commit({ ...state, onboardingComplete: false })) render(true);
+      if (commit({ ...state, onboardingComplete: false })) { welcomeStep = 1;render(true); }
       break;
     case "delete-all":
       confirmDelete(
@@ -457,6 +476,7 @@ document.addEventListener("click", (event) => {
             state = emptyState();
             blocked = false;
             page = "home";
+            welcomeStep = 1;
             render(true);
             notice("All prototype data deleted.");
           } catch {
@@ -477,6 +497,13 @@ main.addEventListener("input", (event) => {
   if (event.target.closest("#entry-form")) saveDraft();
 });
 main.addEventListener("change", (event) => {
+  if (event.target.name === 'trackingGoals') {
+    notice('');
+    const form = event.target.form, other = form.querySelector('[value="other"]').checked;
+    const label = form.querySelector('.tracking-other'), input = label.querySelector('input');
+    label.hidden = !other;input.disabled = !other;input.required = other;
+    if (other && event.target.value === 'other') input.focus();
+  }
   if (event.target.closest('.head-map')) return;
   if (event.target.closest("#entry-form")) formError("");
   if (event.target.name === "ongoing") {
@@ -498,13 +525,21 @@ main.addEventListener("submit", (event) => {
   event.preventDefault();
   const form = event.target;
   const data = new FormData(form);
+  if (form.id === 'welcome-profile-form') {
+    const profile = { ...state.profile, name: data.get('name').trim(), age: data.get('age') === '' ? '' : Number(data.get('age')) };
+    if (commit({ ...state, profile })) { welcomeStep = 2;notice('');render(true); }
+    return;
+  }
+  if (form.id === 'goals-form') {
+    const trackingGoals = data.getAll('trackingGoals');
+    if (!trackingGoals.length) { notice('Choose at least one option, or select Skip for now.');return; }
+    const profile = { ...state.profile, trackingGoals, goal: trackingGoals.includes('other') ? data.get('goal').trim() : '' };
+    if (commit({ ...state, profile, onboardingComplete: true })) { page = 'home';render(true);notice(''); }
+    return;
+  }
   if (form.id === "profile-form") {
     const finishingWelcome = !state.onboardingComplete;
-    const profile = {
-      name: data.get("name").trim(),
-      age: data.get("age") === "" ? "" : Number(data.get("age")),
-      goal: data.get("goal").trim(),
-    };
+    const profile = profileFromForm(data);
     if (commit({ ...state, profile, onboardingComplete: true })) {
       if (finishingWelcome) page = "home";
       render(true);

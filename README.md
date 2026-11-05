@@ -4,7 +4,7 @@ An experimental, privacy-conscious headache and migraine tracking web app.
 
 ## Local logging with 3D pain mapping
 
-Mobile-first local logging: editable start/end times, ongoing entries, a rotatable 3D head with multiple pain locations, compact per-location intensity and coverage controls, behind-the-eye checkboxes, optional characteristics/symptoms/triggers, multiple medication records, and history with view/edit/delete. Skippable onboarding asks for a preferred name, optional age and tracking goal. Settings supports profile editing, clearing, welcome reset and confirmed deletion of all data. Reports remain a placeholder.
+Mobile-first local logging: editable start/end times, ongoing entries, a rotatable 3D head with multiple pain locations, compact per-location intensity and coverage controls, behind-the-eye checkboxes, optional characteristics/symptoms/triggers, multiple medication records, and history with view/edit/delete. Skippable onboarding has two short screens: optional name/age, then multiple tracking-goal buttons with a conditional Other field. Settings supports profile editing, clearing, welcome reset and confirmed deletion of all data. Reports remain a placeholder.
 
 This project shares only its GitHub owner with StudyOS. It has no connection to StudyOS.tech, its resources, or its data.
 
@@ -24,6 +24,6 @@ The Content Security Policy blocks network connections and form submissions, and
 
 ## Deployment
 
-Pushes to `main` deploy to GitHub Pages via the existing GitHub Actions workflow. The `codex/3d-pain-map` review branch does not trigger deployment. Review and explicit approval are required before merging this integration. Do not manually dispatch deployment for the development branch.
+Pushes to `main` deploy to GitHub Pages via the existing GitHub Actions workflow. Development branches do not trigger deployment.
 
 No PWA, cloud database, advanced reporting, or automatic headache diagnosis is included. Anatomical mapping is a prototype and has not been clinically validated.

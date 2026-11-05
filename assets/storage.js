@@ -1,4 +1,5 @@
 import { validatePainData, painDataForEntry, HEAD_MODEL_VERSION } from './head-map/data.js';
+import { TRACKING_GOALS } from './profile.js';
 
 export const STORAGE_KEY = "headache-tracker.v1";
 export const emptyState = () => ({
@@ -88,6 +89,9 @@ export function validateState(state) {
     p.name.length > 40 ||
     typeof p.goal !== "string" ||
     p.goal.length > 160 ||
+    (p.trackingGoals !== undefined && (!Array.isArray(p.trackingGoals) ||
+      p.trackingGoals.some(id => !TRACKING_GOALS.some(option => option.id === id)) ||
+      new Set(p.trackingGoals).size !== p.trackingGoals.length)) ||
     !(p.age === "" || (Number.isInteger(p.age) && p.age >= 1 && p.age <= 120))
   )
     throw new Error("Stored profile is invalid.");
