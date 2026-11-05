@@ -4,7 +4,7 @@ The existing neutral head and connected-surface coverage renderer are integrated
 
 ## Interaction
 
-- Tap the head to add a location; drag to rotate. Vertical rotation is limited to 10° below and 45° above the frontal view.
+- Tap the head to add a location; drag on the head to rotate. Contacts within 10 CSS pixels of its silhouette also rotate; swipes in blank space scroll the page normally. This follows the actual rotated mesh, with its invisible lower fade excluded. Vertical rotation is limited to 10° below and 45° above the frontal view.
 - Tap another existing hotspot to edit it. Tap the active hotspot again, or use Remove, to remove it.
 - Intensity and coverage sliders follow the active hotspot. A new point inherits the last values used within that entry. A new entry starts at intensity 5 and coverage 50.
 - With no hotspot selected, intensity is the entry's overall severity and coverage sets the next point's spread. Existing entries without map data remain editable.
@@ -21,7 +21,7 @@ The history card's overall severity is the maximum point intensity when points e
 
 ## Validation
 
-`node --test tests/*.test.mjs` covers existing storage behavior plus map round-trips, corrupt records, stable entry IDs and legacy drafts. `tests/head-map.browser.cjs` exercises real WebGL selection, sliders, behind-eye choices, draft restoration, saved-entry editing, fresh defaults, phone widths and browser/CSP errors. The browser harness uses the local Codex Playwright runtime and installed Chrome; adjust those two paths for other machines. Serve the repository on port 4173 before running it, or set `APP_URL`.
+`node --test tests/*.test.mjs` covers existing storage behavior plus map round-trips, corrupt records, stable entry IDs and legacy drafts. `tests/head-map.browser.cjs` exercises real WebGL selection, sliders, behind-eye choices, draft restoration, saved-entry editing, fresh defaults, phone widths and browser/CSP errors. `tests/head-touch.browser.cjs` exercises native touch gestures for blank-space scrolling and rotation/tilt on the head at phone widths. The browser harness uses the local Codex Playwright runtime and installed Chrome; adjust those two paths for other machines. Serve the repository on port 4173 before running it, or set `APP_URL`.
 
 ## Credits and review limits
 

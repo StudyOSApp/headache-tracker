@@ -6,7 +6,7 @@ const T = globalThis.THREE, C = globalThis.PainCore, Coverage = globalThis.Surfa
 const MODEL = globalThis.HEAD_MODEL;
 const GUIDE_KEY = 'headache-tracker.head-guidance.v1';
 const template = `
-  <div class="hm-instructions"><span>Tap where it hurts. Drag to rotate.</span><button type="button" class="hm-help text-button" aria-expanded="false">How to select</button></div>
+  <div class="hm-instructions"><span>Tap where it hurts. Drag the head to rotate.</span><button type="button" class="hm-help text-button" aria-expanded="false">How to select</button></div>
   <section class="hm-guide" hidden><h2>Just tap where it hurts.</h2><p>You don't need to be exact. We'll record the approximate location and help you track patterns over time.</p><p>Drag to rotate the head.</p><button type="button" class="hm-got-it">Got it</button></section>
   <div class="hm-scene" role="img" aria-label="Rotatable anatomical head pain map"><p class="hm-render-status" role="status">Loading head…</p></div>
   <div class="hm-edit-controls">
@@ -153,9 +153,46 @@ outgoingLight=mix(outgoingLight,painColor,clamp(strongest,0.0,.98));
       if(covered){if(activeId===covered.id)removeActive(covered.id);else{activeId=covered.id;refresh();emit();status('Pain location selected. Adjust the sliders, or tap it again to remove.');}return;}
       try {const result=C.addPoint(episode,rec.position,rec.normal,rec.surface);if(!result.created&&activeId===result.hotspot.id){removeActive(result.hotspot.id);return;}activeId=result.hotspot.id;analyze(result.hotspot);overallSeverity=Math.max(...episode.painLocations.map(p=>p.intensity));refresh();emit();status('Pain location selected.');}catch(e){status(e.message);}
     }
-    canvas.onpointerdown=e=>{if(start)return;start={x:e.clientX,y:e.clientY,yaw,pitch,id:e.pointerId,moved:false};canvas.setPointerCapture(e.pointerId);};
-    canvas.onpointermove=e=>{if(!start||e.pointerId!==start.id)return;if(Math.hypot(e.clientX-start.x,e.clientY-start.y)>8)start.moved=true;if(!start.moved)return;yaw=start.yaw+(e.clientX-start.x)*.008;pitch=T.MathUtils.clamp(start.pitch+(e.clientY-start.y)*.006,minPitch,maxPitch);};
-    canvas.onpointerup=e=>{if(!start||e.pointerId!==start.id)return;const moved=start.moved;start=null;if(!moved)selectHit(hitAt(e.clientX,e.clientY));if(!readOnly)finishGuide();};canvas.onpointercancel=()=>start=null;canvas.onlostpointercapture=()=>start=null;
+    // Decide from the actual silhouette, including a small finger-friendly margin.
+    // The rest of the canvas keeps native page scrolling and pinch zoom.
+    function nearHead(x,y) {
+      return [[0,0],[10,0],[-10,0],[0,10],[0,-10],[7,7],[-7,7],[7,-7],[-7,-7]].some(([dx,dy]) => {
+        const hit=hitAt(x+dx,y+dy);
+        return hit && head.worldToLocal(hit.point.clone()).y >= -2.85;
+      });
+    }
+    function begin(x,y,id) { start={x,y,yaw,pitch,id,moved:false}; }
+    function move(x,y) {
+      if(Math.hypot(x-start.x,y-start.y)>8)start.moved=true;
+      if(!start.moved)return;
+      yaw=start.yaw+(x-start.x)*.008;
+      pitch=T.MathUtils.clamp(start.pitch+(y-start.y)*.006,minPitch,maxPitch);
+    }
+    function end(x,y) {
+      const moved=start.moved;start=null;
+      if(!moved)selectHit(hitAt(x,y));if(!readOnly)finishGuide();
+    }
+    canvas.onpointerdown=e=>{if(e.pointerType==='touch'||start||!nearHead(e.clientX,e.clientY))return;begin(e.clientX,e.clientY,e.pointerId);canvas.setPointerCapture(e.pointerId);};
+    canvas.onpointermove=e=>{if(e.pointerType!=='touch'&&start&&e.pointerId===start.id)move(e.clientX,e.clientY);};
+    canvas.onpointerup=e=>{if(e.pointerType!=='touch'&&start&&e.pointerId===start.id)end(e.clientX,e.clientY);};
+    canvas.onpointercancel=e=>{if(e.pointerType!=='touch')start=null;};canvas.onlostpointercapture=e=>{if(e.pointerType!=='touch')start=null;};
+    // touch-action cannot be changed after a gesture starts. Cancel native touch
+    // scrolling only when the initial contact actually lands on/near the mesh.
+    canvas.addEventListener('touchstart',e=>{
+      if(e.touches.length!==1){start=null;return;}
+      const t=e.touches[0];if(!nearHead(t.clientX,t.clientY))return;
+      e.preventDefault();begin(t.clientX,t.clientY,t.identifier);
+    },{passive:false});
+    canvas.addEventListener('touchmove',e=>{
+      if(!start)return;if(e.touches.length!==1){start=null;return;}
+      const t=[...e.touches].find(t=>t.identifier===start.id);if(!t)return;
+      e.preventDefault();move(t.clientX,t.clientY);
+    },{passive:false});
+    canvas.addEventListener('touchend',e=>{
+      if(!start)return;const t=[...e.changedTouches].find(t=>t.identifier===start.id);
+      if(t){e.preventDefault();end(t.clientX,t.clientY);}
+    },{passive:false});
+    canvas.addEventListener('touchcancel',()=>start=null);
     resizeObserver = new ResizeObserver(()=>{const w=$('.hm-scene').clientWidth,h=$('.hm-scene').clientHeight;renderer.setSize(w,h);camera.aspect=w/h;camera.position.z=Math.max(16.8,13.5/(w/h));camera.updateProjectionMatrix();});resizeObserver.observe($('.hm-scene'));
     for(const point of episode.painLocations)analyze(point);refresh();$('.hm-render-status').hidden=true;
     const animate=()=>{if(destroyed)return;group.rotation.set(pitch,yaw,0);renderer.render(scene,camera);animation=requestAnimationFrame(animate);};animate();

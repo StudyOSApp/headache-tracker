@@ -17,6 +17,8 @@ body {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
+/* Blank canvas space scrolls naturally; only contacts on the head are handled. */
+.head-map .hm-scene canvas { touch-action: pan-y pinch-zoom; }
 button,
 input,
 select,
