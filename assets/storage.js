@@ -1,3 +1,6 @@
+import { validatePainData, painDataForEntry, HEAD_MODEL_VERSION } from './head-map/data.js';
+import { TRACKING_GOALS } from './profile.js';
+
 export const STORAGE_KEY = "headache-tracker.v1";
 export const emptyState = () => ({
   version: 1,
@@ -62,6 +65,13 @@ export function validateEntry(entry, now = Date.now()) {
     )
       throw new Error("Choose a listed effectiveness option.");
   }
+  if (entry.painLocations !== undefined || entry.behindEye !== undefined) {
+    if ((entry.painLocations !== undefined && !Array.isArray(entry.painLocations)) ||
+        (entry.behindEye !== undefined && !Array.isArray(entry.behindEye)) ||
+        (entry.painModelVersion !== undefined && entry.painModelVersion !== HEAD_MODEL_VERSION))
+      throw new Error('Stored pain-map details are unsupported.');
+    validatePainData(painDataForEntry(entry));
+  }
   return entry;
 }
 export function validateState(state) {
@@ -79,6 +89,9 @@ export function validateState(state) {
     p.name.length > 40 ||
     typeof p.goal !== "string" ||
     p.goal.length > 160 ||
+    (p.trackingGoals !== undefined && (!Array.isArray(p.trackingGoals) ||
+      p.trackingGoals.some(id => !TRACKING_GOALS.some(option => option.id === id)) ||
+      new Set(p.trackingGoals).size !== p.trackingGoals.length)) ||
     !(p.age === "" || (Number.isInteger(p.age) && p.age >= 1 && p.age <= 120))
   )
     throw new Error("Stored profile is invalid.");
